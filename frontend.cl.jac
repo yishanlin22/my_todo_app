@@ -1,4 +1,4 @@
-"""Todo App - Client-Side UI with priority lanes, filters, DnD, and meal integration."""
+"""Todo App - Client-Side UI with lists, collaboration, priority lanes, filters, DnD, and meal integration."""
 
 import from "@jac/runtime" { jacSignup, jacLogin, jacLogout, jacIsLoggedIn }
 
@@ -10,8 +10,11 @@ import from .components.IngredientItem { IngredientItem }
 import from .components.FilterPopover { FilterPopover }
 
 sv import from main {
+    WhoAmI, SetupUser,
+    CreateTodoList, ListTodoLists, RenameTodoList, DeleteTodoList,
     AddTodo, ListTodos, ToggleTodo, DeleteTodo,
     UpdateTodoPriority, ReorderTodos, AddIngredientsAsTodos,
+    ShareList, ListInvitations, RespondToInvitation, GetListMembers, RemoveListMember,
     GenerateShoppingList, ListMealPlan, ClearMealPlan
 }
 
@@ -23,20 +26,38 @@ def:pub app -> any {
         password: str = "",
         error: str = "",
         loading: bool = False,
+        loggedInUser: str = "",
+        # Lists
+        lists: list = [],
+        activeListId: str = "",
+        newListTitle: str = "",
+        creatingList: bool = False,
+        renamingListId: str = "",
+        renameTitle: str = "",
+        # Todos
         todos: list = [],
         newTodoText: str = "",
         newTodoPriority: str = "medium",
         todosLoading: bool = True,
+        # Meal planner
         mealInput: str = "",
         ingredients: list = [],
         ingredientsLoading: bool = False,
         excludedIngredients: list = [],
         ingredientsPriority: str = "medium",
+        # Filters
         filterOpen: bool = False,
         filterPriority: list = [],
         filterCompletion: list = [],
         filterTag: list = [],
-        dragTodoId: str = "";
+        dragTodoId: str = "",
+        # Collaboration
+        invitations: list = [],
+        invitationsOpen: bool = False,
+        shareDialogOpen: bool = False,
+        shareUsername: str = "",
+        shareError: str = "",
+        listMembers: list = [];
 
     can with entry {
         isLoggedIn = jacIsLoggedIn();
@@ -45,29 +66,36 @@ def:pub app -> any {
 
     can with [isLoggedIn] entry {
         if isLoggedIn {
-            fetchTodos();
-            fetchMealPlan();
+            initAfterLogin();
         }
     }
 
     # Method declarations (implementations in frontend.impl.jac)
-    async def fetchTodos -> None;
+    # Initialization
+    async def initAfterLogin -> None;
+    # Auth
+    async def handleLogin -> None;
+    async def handleSignup -> None;
+    def handleLogout -> None;
+    async def handleSubmit(e: any) -> None;
+    # List management
+    async def fetchLists(user: str) -> None;
+    async def createList -> None;
+    async def renameList(listId: str, title: str) -> None;
+    async def deleteList(listId: str) -> None;
+    async def selectList(listId: str) -> None;
+    def startRenaming(listId: str, currentTitle: str) -> None;
+    async def finishRenaming -> None;
+    def handleNewListKeyPress(e: any) -> None;
+    def handleRenameKeyPress(e: any) -> None;
+    # Todos
+    async def fetchTodos(listId: str, user: str) -> None;
     async def addTodo -> None;
     async def toggleTodo(todoId: str) -> None;
     async def deleteTodo(todoId: str) -> None;
     async def updateTodoPriority(todoId: str, newPriority: str) -> None;
     async def reorderTodos(updates: list) -> None;
-    async def handleLogin -> None;
-    async def handleSignup -> None;
-    def handleLogout -> None;
-    async def handleSubmit(e: any) -> None;
     def handleTodoKeyPress(e: any) -> None;
-    async def fetchMealPlan -> None;
-    async def generateIngredients -> None;
-    async def clearIngredients -> None;
-    async def addIngredientsAsTodos -> None;
-    def handleMealKeyPress(e: any) -> None;
-    def getIngredientsTotal -> float;
     def getFilteredTodos(priority: str) -> list;
     def toggleFilterPriority(p: str) -> None;
     def toggleFilterCompletion(c: str) -> None;
@@ -76,7 +104,23 @@ def:pub app -> any {
     def onDragOverTodo(todoId: str, e: any) -> None;
     def onDropOnTodo(todoId: str, e: any) -> None;
     def onDropOnLane(priority: str, e: any) -> None;
+    # Meal planner
+    async def fetchMealPlan -> None;
+    async def generateIngredients -> None;
+    async def clearIngredients -> None;
+    async def addIngredientsAsTodos -> None;
+    def handleMealKeyPress(e: any) -> None;
+    def getIngredientsTotal -> float;
     def toggleIngredientExclude(idx: int) -> None;
+    # Collaboration
+    async def fetchInvitations -> None;
+    async def respondToInvitation(invId: str, accept: bool) -> None;
+    async def shareList -> None;
+    async def fetchListMembers -> None;
+    async def removeListMember(uname: str) -> None;
+    def openShareDialog -> None;
+    def closeShareDialog -> None;
+    def handleShareKeyPress(e: any) -> None;
 
     if checkingAuth {
         return
@@ -93,6 +137,10 @@ def:pub app -> any {
         mediumTodos = getFilteredTodos("medium");
         lowTodos = getFilteredTodos("low");
         activeFilterCount = filterPriority.length + filterCompletion.length + filterTag.length;
+        myLists = lists.filter(lambda l: any -> bool { return l.owner == loggedInUser; });
+        sharedLists = lists.filter(lambda l: any -> bool { return l.owner != loggedInUser; });
+        activeList = lists.find(lambda l: any -> bool { return l.id == activeListId; });
+        isOwner = activeList and activeList.owner == loggedInUser;
         return
             <div className="app-container">
                 <div className="app-content">
@@ -101,16 +149,171 @@ def:pub app -> any {
                             <div>
                                 <h1 className="app-title">TaskFlow</h1>
                                 <p className="app-subtitle">
-                                    Todo list with AI meal planning
+                                    Signed in as <strong>{loggedInUser}</strong>
                                 </p>
                             </div>
-                            <button onClick={handleLogout} className="btn-signout">
-                                Sign Out
-                            </button>
+                            <div style={{"display": "flex", "alignItems": "center", "gap": "0.75rem"}}>
+                                <div style={{"position": "relative"}}>
+                                    <button
+                                        onClick={lambda -> None { invitationsOpen = not invitationsOpen; }}
+                                        className="invite-bell"
+                                        title="Invitations"
+                                    >
+                                        Inbox
+                                        {(
+                                            <span className="invite-bell-badge">{invitations.length}</span>
+                                        ) if invitations.length > 0 else None}
+                                    </button>
+                                    {(
+                                        <div className="invite-dropdown">
+                                            <div style={{"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "0.75rem"}}>
+                                                <span style={{"color": "white", "fontWeight": "600", "fontSize": "0.9rem"}}>Invitations</span>
+                                                <button onClick={lambda -> None { invitationsOpen = False; }} className="filter-close-btn">x</button>
+                                            </div>
+                                            {(
+                                                <div className="invite-empty">No pending invitations</div>
+                                            ) if invitations.length == 0 else (
+                                                <div>
+                                                    {[
+                                                        <div key={inv.id} className="invite-item">
+                                                            <div className="invite-info">
+                                                                <div className="invite-from">{inv.from_user}</div>
+                                                                <div className="invite-list-title">invites you to "{inv.list_title}"</div>
+                                                            </div>
+                                                            <div className="invite-actions">
+                                                                <button
+                                                                    onClick={lambda -> None { respondToInvitation(inv.id, True); }}
+                                                                    className="invite-accept-btn"
+                                                                >Accept</button>
+                                                                <button
+                                                                    onClick={lambda -> None { respondToInvitation(inv.id, False); }}
+                                                                    className="invite-decline-btn"
+                                                                >Decline</button>
+                                                            </div>
+                                                        </div>
+                                                    for inv in invitations]}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) if invitationsOpen else None}
+                                </div>
+                                <button onClick={handleLogout} className="btn-signout">
+                                    Sign Out
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div className="two-column-layout">
+                    <div className="three-column-layout">
+                        <div className="column-sidebar">
+                            <div className="list-sidebar">
+                                <div className="list-sidebar-title">My Lists</div>
+                                {[
+                                    <div
+                                        key={lst.id}
+                                        className={("list-item list-item-active" if lst.id == activeListId else "list-item")}
+                                        onClick={lambda -> None { selectList(lst.id); }}
+                                    >
+                                        <span className="list-item-title">
+                                            {lst.title}
+                                        </span>
+                                        {(
+                                            <span className="shared-badge">shared</span>
+                                        ) if lst.shared_with.length > 0 else None}
+                                        <span className="list-item-count">{lst.todo_count}</span>
+                                    </div>
+                                for lst in myLists]}
+                                {(
+                                    <div>
+                                        <div className="list-sidebar-title" style={{"marginTop": "1rem"}}>Shared with Me</div>
+                                        {[
+                                            <div
+                                                key={slst.id}
+                                                className={("list-item list-item-active" if slst.id == activeListId else "list-item")}
+                                                onClick={lambda -> None { selectList(slst.id); }}
+                                            >
+                                                <span className="list-item-title">{slst.title}</span>
+                                                <span className="shared-badge">{slst.owner}</span>
+                                                <span className="list-item-count">{slst.todo_count}</span>
+                                            </div>
+                                        for slst in sharedLists]}
+                                    </div>
+                                ) if sharedLists.length > 0 else None}
+                                {(
+                                    <div>
+                                        <input
+                                            type="text"
+                                            value={newListTitle}
+                                            onChange={lambda e: any -> None { newListTitle = e.target.value; }}
+                                            onKeyPress={handleNewListKeyPress}
+                                            placeholder="List name..."
+                                            className="list-create-input"
+                                            autoFocus={True}
+                                        />
+                                    </div>
+                                ) if creatingList else (
+                                    <button
+                                        onClick={lambda -> None { creatingList = True; }}
+                                        className="list-add-btn"
+                                    >
+                                        + New List
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                         <div className="column-left">
+                            {(
+                                <div className="card">
+                                    <div className="list-header-bar">
+                                        <div>
+                                            <h2 className="panel-title">{activeList.title if activeList else "Select a list"}</h2>
+                                            {(
+                                                <div className="shared-users">
+                                                    {[
+                                                        <span key={su} className="shared-user-chip">{su}</span>
+                                                    for su in activeList.shared_with]}
+                                                </div>
+                                            ) if activeList and activeList.shared_with.length > 0 else None}
+                                        </div>
+                                        {(
+                                            <div className="list-actions-bar">
+                                                <button
+                                                    onClick={lambda -> None { openShareDialog(); }}
+                                                    className="btn-share"
+                                                    title="Share this list"
+                                                >Share</button>
+                                                <button
+                                                    onClick={lambda -> None { startRenaming(activeListId, activeList.title); }}
+                                                    className="btn-list-action"
+                                                    title="Rename list"
+                                                >Rename</button>
+                                                {(
+                                                    <button
+                                                        onClick={lambda -> None { deleteList(activeListId); }}
+                                                        className="btn-list-delete"
+                                                        title="Delete list"
+                                                    >Delete</button>
+                                                ) if myLists.length > 1 else None}
+                                            </div>
+                                        ) if isOwner else None}
+                                    </div>
+                                </div>
+                            ) if activeList else None}
+                            {(
+                                <div className="card rename-card">
+                                    <div className="add-row">
+                                        <input
+                                            type="text"
+                                            value={renameTitle}
+                                            onChange={lambda e: any -> None { renameTitle = e.target.value; }}
+                                            onKeyPress={handleRenameKeyPress}
+                                            className="todo-input"
+                                            autoFocus={True}
+                                        />
+                                        <button onClick={lambda -> None { finishRenaming(); }} className="btn-add">Save</button>
+                                        <button onClick={lambda -> None { renamingListId = ""; }} className="btn-clear">Cancel</button>
+                                    </div>
+                                </div>
+                            ) if renamingListId else None}
                             <div className="card">
                                 <div className="add-row">
                                     <input
@@ -337,6 +540,56 @@ def:pub app -> any {
                         </div>
                     </div>
                 </div>
+                {(
+                    <div className="share-dialog-overlay" onClick={lambda -> None { closeShareDialog(); }}>
+                        <div className="share-dialog" onClick={lambda e: any -> None { e.stopPropagation(); }}>
+                            <div className="share-dialog-title">
+                                Share "{activeList.title if activeList else ""}"
+                            </div>
+                            {(
+                                <div className="share-error">{shareError}</div>
+                            ) if shareError else None}
+                            <div className="share-input-row">
+                                <input
+                                    type="text"
+                                    value={shareUsername}
+                                    onChange={lambda e: any -> None { shareUsername = e.target.value; shareError = ""; }}
+                                    onKeyPress={handleShareKeyPress}
+                                    placeholder="Enter username to invite..."
+                                    className="share-input"
+                                    autoFocus={True}
+                                />
+                                <button onClick={lambda -> None { shareList(); }} className="share-btn">
+                                    Invite
+                                </button>
+                            </div>
+                            <div className="share-member-list">
+                                <div className="list-sidebar-title">Members</div>
+                                {[
+                                    <div key={mem.username} className="share-member">
+                                        <span>{mem.username}</span>
+                                        {(
+                                            <span className="share-member-owner">owner</span>
+                                        ) if mem.role == "owner" else (
+                                            <button
+                                                onClick={lambda -> None { removeListMember(mem.username); }}
+                                                className="share-remove-btn"
+                                                title="Remove member"
+                                            >x</button>
+                                        ) if isOwner else (
+                                            <span className="shared-badge">{mem.role}</span>
+                                        )}
+                                    </div>
+                                for mem in listMembers]}
+                            </div>
+                            <div style={{"marginTop": "1rem", "textAlign": "right"}}>
+                                <button onClick={lambda -> None { closeShareDialog(); }} className="share-close-btn">
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) if shareDialogOpen else None}
             </div>;
     }
 

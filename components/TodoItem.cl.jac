@@ -1,4 +1,4 @@
-"""Todo item component with priority badge and drag support."""
+"""Todo item component with priority badge, drag support, and completed-by display."""
 
 def:pub TodoItem(
     todo: dict,
@@ -23,9 +23,14 @@ def:pub TodoItem(
                 onChange={lambda -> None { onToggle(todo.id); }}
                 className="todo-checkbox"
             />
-            <span className={("todo-title-completed" if todo.completed else "todo-title")}>
-                {todo.title}
-            </span>
+            <div className="todo-content">
+                <span className={("todo-title-completed" if todo.completed else "todo-title")}>
+                    {todo.title}
+                </span>
+                {(
+                    <span className="completed-by">completed by {todo.completed_by}</span>
+                ) if todo.completed and todo.completed_by else None}
+            </div>
             {(
                 <span className="category-badge">{todo.category}</span>
             ) if todo.category and todo.category != "other" else None}
@@ -34,7 +39,7 @@ def:pub TodoItem(
                 onClick={lambda -> None { onDelete(todo.id); }}
                 className="todo-delete-btn"
             >
-                ×
+                x
             </button>
         </div>;
 }
