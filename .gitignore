@@ -21,3 +21,8 @@ node_modules/
 .jac/
 *.session
 *.session.*
+
+# Dev scripts
+patch_client_runtime.sh
+debug_walker.sh
+
