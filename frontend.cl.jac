@@ -57,7 +57,9 @@ def:pub app -> any {
         shareDialogOpen: bool = False,
         shareUsername: str = "",
         shareError: str = "",
-        listMembers: list = [];
+        listMembers: list = [],
+        # Theme
+        theme: str = "default";
 
     can with entry {
         isLoggedIn = jacIsLoggedIn();
@@ -141,8 +143,9 @@ def:pub app -> any {
         sharedLists = lists.filter(lambda l: any -> bool { return l.owner != loggedInUser; });
         activeList = lists.find(lambda l: any -> bool { return l.id == activeListId; });
         isOwner = activeList and activeList.owner == loggedInUser;
+        themeClass = ("app-container" if theme == "default" else "app-container theme-" + theme);
         return
-            <div className="app-container">
+            <div className={themeClass}>
                 <div className="app-content">
                     <div className="card">
                         <div className="card-header">
@@ -153,6 +156,20 @@ def:pub app -> any {
                                 </p>
                             </div>
                             <div style={{"display": "flex", "alignItems": "center", "gap": "0.75rem"}}>
+                                <div style={{"display": "flex", "alignItems": "center", "gap": "0.35rem"}}>
+                                    <span style={{"fontSize": "0.8rem", "color": "var(--text-muted)", "whiteSpace": "nowrap"}}>Theme:</span>
+                                    <select
+                                        value={theme}
+                                        onChange={lambda e: any -> None { theme = e.target.value; }}
+                                        className="theme-select"
+                                        title="Switch theme"
+                                    >
+                                        <option value="default">Dark</option>
+                                        <option value="light">Light</option>
+                                        <option value="valentine">Valentine</option>
+                                        <option value="cny">New Year</option>
+                                    </select>
+                                </div>
                                 <div style={{"position": "relative"}}>
                                     <button
                                         onClick={lambda -> None { invitationsOpen = not invitationsOpen; }}
@@ -268,6 +285,7 @@ def:pub app -> any {
                                             <h2 className="panel-title">{activeList.title if activeList else "Select a list"}</h2>
                                             {(
                                                 <div className="shared-users">
+                                                    <span className="shared-user-chip shared-user-owner">{activeList.owner}</span>
                                                     {[
                                                         <span key={su} className="shared-user-chip">{su}</span>
                                                     for su in activeList.shared_with]}
@@ -590,6 +608,21 @@ def:pub app -> any {
                         </div>
                     </div>
                 ) if shareDialogOpen else None}
+                {(
+                    <span className="horse-runner">🐎🐎🐎🧧🧧🧧🏮🏮🏮🥟🥟🥟🎇🎇🎇🧨🧨🧨🐎🐎🐎</span>
+                ) if theme == "cny" else None}
+                {(
+                    <div>
+                        <span className="float-emoji" style={{"left": "5%", "animationDelay": "0s", "fontSize": "1.4rem"}}>❤️</span>
+                        <span className="float-emoji" style={{"left": "15%", "animationDelay": "1.2s", "fontSize": "1.1rem"}}>🌸</span>
+                        <span className="float-emoji" style={{"left": "28%", "animationDelay": "2.8s", "fontSize": "1.6rem"}}>💕</span>
+                        <span className="float-emoji" style={{"left": "40%", "animationDelay": "0.5s", "fontSize": "1.2rem"}}>🌹</span>
+                        <span className="float-emoji" style={{"left": "55%", "animationDelay": "3.5s", "fontSize": "1.5rem"}}>💗</span>
+                        <span className="float-emoji" style={{"left": "65%", "animationDelay": "1.8s", "fontSize": "1.1rem"}}>🌺</span>
+                        <span className="float-emoji" style={{"left": "78%", "animationDelay": "4.2s", "fontSize": "1.4rem"}}>💖</span>
+                        <span className="float-emoji" style={{"left": "90%", "animationDelay": "2.2s", "fontSize": "1.3rem"}}>🌷</span>
+                    </div>
+                ) if theme == "valentine" else None}
             </div>;
     }
 
@@ -604,5 +637,7 @@ def:pub app -> any {
             onPasswordChange={lambda e: any -> None { password = e.target.value; }}
             onSubmit={handleSubmit}
             onToggleMode={lambda -> None { isSignup = not isSignup; error = ""; }}
+            theme={theme}
+            onThemeChange={lambda e: any -> None { theme = e.target.value; }}
         />;
 }

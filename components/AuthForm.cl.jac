@@ -9,10 +9,26 @@ def:pub AuthForm(
     onUsernameChange: any,
     onPasswordChange: any,
     onSubmit: any,
-    onToggleMode: any
+    onToggleMode: any,
+    theme: str,
+    onThemeChange: any
 ) -> any {
+    authClass = ("auth-container" if theme == "default" else "auth-container theme-" + theme);
     return
-        <div className="auth-container">
+        <div className={authClass}>
+            <div style={{"position": "absolute", "top": "1rem", "right": "1rem"}}>
+                <select
+                    value={theme}
+                    onChange={onThemeChange}
+                    className="theme-select"
+                    title="Switch theme"
+                >
+                    <option value="default">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="valentine">Valentine</option>
+                    <option value="cny">New Year</option>
+                </select>
+            </div>
             <div className="auth-card">
                 <div className="auth-header">
                     <div className="auth-logo">
