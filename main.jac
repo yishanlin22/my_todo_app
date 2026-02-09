@@ -43,7 +43,9 @@ node Todo {
     has id: str,
         title: str,
         completed: bool = False,
-        category: str = "other";
+        category: str = "other",
+        priority: str = "medium",
+        order: int = 0;
 }
 
 node MealIngredient {
@@ -58,19 +60,41 @@ node MealIngredient {
 
 walker:priv AddTodo {
     has title: str;
+    has priority: str = "medium";
+    has max_order: int = 0;
 
-    can create with Root entry {
-        category = str(categorize(self.title)).split(".")[-1].lower();
+    can visit_children with Root entry {
+        visit [-->];
+    }
+
+    can count_order with Todo entry {
+        if here.priority == self.priority and here.order >= self.max_order {
+            self.max_order = here.order + 1;
+        }
+    }
+
+    can create with Root exit {
+        # Runs after all children visited, so max_order is correct
+        category = "other";
+        try {
+            category = str(categorize(self.title)).split(".")[-1].lower();
+        } except Exception as e {
+            category = "other";
+        }
         new_todo = here ++> Todo(
             id=str(uuid4()),
             title=self.title,
-            category=category
+            category=category,
+            priority=self.priority,
+            order=self.max_order
         );
         report {
             "id": new_todo[0].id,
             "title": new_todo[0].title,
             "completed": new_todo[0].completed,
-            "category": new_todo[0].category
+            "category": new_todo[0].category,
+            "priority": new_todo[0].priority,
+            "order": new_todo[0].order
         };
     }
 }
@@ -87,7 +111,9 @@ walker:priv ListTodos {
             "id": here.id,
             "title": here.title,
             "completed": here.completed,
-            "category": here.category
+            "category": here.category,
+            "priority": here.priority,
+            "order": here.order
         });
     }
 
@@ -99,9 +125,7 @@ walker:priv ListTodos {
 walker:priv ToggleTodo {
     has todo_id: str;
 
-    can search with Root entry {
-        visit [-->];
-    }
+    can search with Root entry { visit [-->]; }
 
     can toggle with Todo entry {
         if here.id == self.todo_id {
@@ -117,15 +141,91 @@ walker:priv ToggleTodo {
 walker:priv DeleteTodo {
     has todo_id: str;
 
-    can search with Root entry {
-        visit [-->];
-    }
+    can search with Root entry { visit [-->]; }
 
     can delete with Todo entry {
         if here.id == self.todo_id {
             del here;
             report {"deleted": self.todo_id};
         }
+    }
+}
+
+walker:priv UpdateTodoPriority {
+    has todo_id: str;
+    has priority: str;
+
+    can search with Root entry { visit [-->]; }
+
+    can update with Todo entry {
+        if here.id == self.todo_id {
+            here.priority = self.priority;
+            report {
+                "id": here.id,
+                "priority": here.priority,
+                "order": here.order
+            };
+        }
+    }
+}
+
+walker:priv ReorderTodos {
+    has updates: list = [];
+
+    can search with Root entry { visit [-->]; }
+
+    can update_order with Todo entry {
+        for upd in self.updates {
+            if here.id == upd["id"] {
+                here.order = upd["order"];
+                here.priority = upd["priority"];
+            }
+        }
+    }
+
+    can done with Root exit {
+        report {"done": True};
+    }
+}
+
+walker:priv AddIngredientsAsTodos {
+    has ingredients: list = [];
+    has priority: str = "medium";
+    has max_order: int = 0;
+
+    can visit_children with Root entry {
+        visit [-->];
+    }
+
+    can count_order with Todo entry {
+        if here.priority == self.priority and here.order >= self.max_order {
+            self.max_order = here.order + 1;
+        }
+    }
+
+    can create with Root exit {
+        # Runs after all children visited, so max_order is correct
+        result: list = [];
+        for ing in self.ingredients {
+            title = "Buy " + str(ing["quantity"]) + " " + ing["unit"] + " " + ing["name"];
+            new_todo = here ++> Todo(
+                id=str(uuid4()),
+                title=title,
+                category="shopping",
+                priority=self.priority,
+                order=self.max_order
+            );
+            self.max_order = self.max_order + 1;
+            result.append({
+                "id": new_todo[0].id,
+                "title": new_todo[0].title,
+                "completed": new_todo[0].completed,
+                "category": new_todo[0].category,
+                "priority": new_todo[0].priority,
+                "order": new_todo[0].order
+            });
+        }
+        report result;
     }
 }
 
@@ -138,24 +238,28 @@ walker:priv GenerateShoppingList {
         # First clear old ingredients
         visit [-->];
         # Then generate new ones
-        ingredients = generate_ingredients(self.meal_description);
         result: list = [];
-        for ing in ingredients {
-            ing_data = {
-                "name": ing.name,
-                "quantity": ing.quantity,
-                "unit": str(ing.unit).split(".")[-1].lower(),
-                "cost": ing.cost,
-                "carby": ing.carby
-            };
-            here ++> MealIngredient(
-                name=ing_data["name"],
-                quantity=ing_data["quantity"],
-                unit=ing_data["unit"],
-                cost=ing_data["cost"],
-                carby=ing_data["carby"]
-            );
-            result.append(ing_data);
+        try {
+            ingredients = generate_ingredients(self.meal_description);
+            for ing in ingredients {
+                ing_data = {
+                    "name": ing.name,
+                    "quantity": ing.quantity,
+                    "unit": str(ing.unit).split(".")[-1].lower(),
+                    "cost": ing.cost,
+                    "carby": ing.carby
+                };
+                here ++> MealIngredient(
+                    name=ing_data["name"],
+                    quantity=ing_data["quantity"],
+                    unit=ing_data["unit"],
+                    cost=ing_data["cost"],
+                    carby=ing_data["carby"]
+                );
+                result.append(ing_data);
+            }
+        } except Exception as e {
+            result = [];
         }
         report result;
     }

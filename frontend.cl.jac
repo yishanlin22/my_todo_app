@@ -1,4 +1,4 @@
-"""Todo App - Client-Side UI."""
+"""Todo App - Client-Side UI with priority lanes, filters, DnD, and meal integration."""
 
 import from "@jac/runtime" { jacSignup, jacLogin, jacLogout, jacIsLoggedIn }
 
@@ -7,9 +7,11 @@ import "./styles.css";
 import from .components.TodoItem { TodoItem }
 import from .components.AuthForm { AuthForm }
 import from .components.IngredientItem { IngredientItem }
+import from .components.FilterPopover { FilterPopover }
 
 sv import from main {
     AddTodo, ListTodos, ToggleTodo, DeleteTodo,
+    UpdateTodoPriority, ReorderTodos, AddIngredientsAsTodos,
     GenerateShoppingList, ListMealPlan, ClearMealPlan
 }
 
@@ -23,10 +25,18 @@ def:pub app -> any {
         loading: bool = False,
         todos: list = [],
         newTodoText: str = "",
+        newTodoPriority: str = "medium",
         todosLoading: bool = True,
         mealInput: str = "",
         ingredients: list = [],
-        ingredientsLoading: bool = False;
+        ingredientsLoading: bool = False,
+        excludedIngredients: list = [],
+        ingredientsPriority: str = "medium",
+        filterOpen: bool = False,
+        filterPriority: list = [],
+        filterCompletion: list = [],
+        filterTag: list = [],
+        dragTodoId: str = "";
 
     can with entry {
         isLoggedIn = jacIsLoggedIn();
@@ -45,6 +55,8 @@ def:pub app -> any {
     async def addTodo -> None;
     async def toggleTodo(todoId: str) -> None;
     async def deleteTodo(todoId: str) -> None;
+    async def updateTodoPriority(todoId: str, newPriority: str) -> None;
+    async def reorderTodos(updates: list) -> None;
     async def handleLogin -> None;
     async def handleSignup -> None;
     def handleLogout -> None;
@@ -53,8 +65,18 @@ def:pub app -> any {
     async def fetchMealPlan -> None;
     async def generateIngredients -> None;
     async def clearIngredients -> None;
+    async def addIngredientsAsTodos -> None;
     def handleMealKeyPress(e: any) -> None;
     def getIngredientsTotal -> float;
+    def getFilteredTodos(priority: str) -> list;
+    def toggleFilterPriority(p: str) -> None;
+    def toggleFilterCompletion(c: str) -> None;
+    def toggleFilterTag(t: str) -> None;
+    def onDragStart(todoId: str, e: any) -> None;
+    def onDragOverTodo(todoId: str, e: any) -> None;
+    def onDropOnTodo(todoId: str, e: any) -> None;
+    def onDropOnLane(priority: str, e: any) -> None;
+    def toggleIngredientExclude(idx: int) -> None;
 
     if checkingAuth {
         return
@@ -67,6 +89,10 @@ def:pub app -> any {
 
     if isLoggedIn {
         totalCost = getIngredientsTotal();
+        highTodos = getFilteredTodos("high");
+        mediumTodos = getFilteredTodos("medium");
+        lowTodos = getFilteredTodos("low");
+        activeFilterCount = filterPriority.length + filterCompletion.length + filterTag.length;
         return
             <div className="app-container">
                 <div className="app-content">
@@ -95,6 +121,15 @@ def:pub app -> any {
                                         placeholder="What needs to be done?"
                                         className="todo-input"
                                     />
+                                    <select
+                                        value={newTodoPriority}
+                                        onChange={lambda e: any -> None { newTodoPriority = e.target.value; }}
+                                        className="priority-select"
+                                    >
+                                        <option value="high">High</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="low">Low</option>
+                                    </select>
                                     <button
                                         onClick={lambda -> None { addTodo(); }}
                                         className="btn-add"
@@ -102,17 +137,43 @@ def:pub app -> any {
                                         Add
                                     </button>
                                 </div>
+                                <div className="filter-bar">
+                                    <button
+                                        onClick={lambda -> None { filterOpen = not filterOpen; }}
+                                        className={("filter-icon-btn filter-icon-btn-active" if activeFilterCount > 0 else "filter-icon-btn")}
+                                    >
+                                        {"Filter" + ((" (" + activeFilterCount + ")") if activeFilterCount > 0 else "")}
+                                    </button>
+                                    {(
+                                        <FilterPopover
+                                            filterPriority={filterPriority}
+                                            filterCompletion={filterCompletion}
+                                            filterTag={filterTag}
+                                            onTogglePriority={toggleFilterPriority}
+                                            onToggleCompletion={toggleFilterCompletion}
+                                            onToggleTag={toggleFilterTag}
+                                            onClose={lambda -> None { filterOpen = False; }}
+                                        />
+                                    ) if filterOpen else None}
+                                </div>
                             </div>
-                            <div className="card">
-                                {(
-                                    <div className="loading-message">Loading tasks...</div>
-                                ) if todosLoading else (
-                                    <div>
+                            {(
+                                <div className="loading-message">Loading tasks...</div>
+                            ) if todosLoading else (
+                                <div className="priority-lanes">
+                                    <div
+                                        className="priority-lane"
+                                        onDragOver={lambda e: any -> None { e.preventDefault(); }}
+                                        onDrop={lambda e: any -> None { e.preventDefault(); onDropOnLane("high", e); }}
+                                    >
+                                        <div className="lane-header lane-header-high">
+                                            <span className="lane-dot lane-dot-high"></span>
+                                            High
+                                            <span className="lane-count">{highTodos.length}</span>
+                                        </div>
                                         {(
-                                            <div className="empty-message">
-                                                No tasks yet. Add one above!
-                                            </div>
-                                        ) if todos.length == 0 else (
+                                            <div className="lane-empty">No high priority tasks</div>
+                                        ) if highTodos.length == 0 else (
                                             <div>
                                                 {[
                                                     <TodoItem
@@ -120,13 +181,72 @@ def:pub app -> any {
                                                         todo={todo}
                                                         onToggle={toggleTodo}
                                                         onDelete={deleteTodo}
-                                                    /> for todo in todos
+                                                        onDragStart={onDragStart}
+                                                        onDragOver={onDragOverTodo}
+                                                        onDrop={onDropOnTodo}
+                                                    /> for todo in highTodos
                                                 ]}
                                             </div>
                                         )}
                                     </div>
-                                )}
-                            </div>
+                                    <div
+                                        className="priority-lane"
+                                        onDragOver={lambda e: any -> None { e.preventDefault(); }}
+                                        onDrop={lambda e: any -> None { e.preventDefault(); onDropOnLane("medium", e); }}
+                                    >
+                                        <div className="lane-header lane-header-medium">
+                                            <span className="lane-dot lane-dot-medium"></span>
+                                            Medium
+                                            <span className="lane-count">{mediumTodos.length}</span>
+                                        </div>
+                                        {(
+                                            <div className="lane-empty">No medium priority tasks</div>
+                                        ) if mediumTodos.length == 0 else (
+                                            <div>
+                                                {[
+                                                    <TodoItem
+                                                        key={todo.id}
+                                                        todo={todo}
+                                                        onToggle={toggleTodo}
+                                                        onDelete={deleteTodo}
+                                                        onDragStart={onDragStart}
+                                                        onDragOver={onDragOverTodo}
+                                                        onDrop={onDropOnTodo}
+                                                    /> for todo in mediumTodos
+                                                ]}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div
+                                        className="priority-lane"
+                                        onDragOver={lambda e: any -> None { e.preventDefault(); }}
+                                        onDrop={lambda e: any -> None { e.preventDefault(); onDropOnLane("low", e); }}
+                                    >
+                                        <div className="lane-header lane-header-low">
+                                            <span className="lane-dot lane-dot-low"></span>
+                                            Low
+                                            <span className="lane-count">{lowTodos.length}</span>
+                                        </div>
+                                        {(
+                                            <div className="lane-empty">No low priority tasks</div>
+                                        ) if lowTodos.length == 0 else (
+                                            <div>
+                                                {[
+                                                    <TodoItem
+                                                        key={todo.id}
+                                                        todo={todo}
+                                                        onToggle={toggleTodo}
+                                                        onDelete={deleteTodo}
+                                                        onDragStart={onDragStart}
+                                                        onDragOver={onDragOverTodo}
+                                                        onDrop={onDropOnTodo}
+                                                    /> for todo in lowTodos
+                                                ]}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                             <div className="remaining-count">
                                 {todos.filter(
                                     lambda t: any -> bool { return not t.completed; }
@@ -171,22 +291,43 @@ def:pub app -> any {
                                             </div>
                                         ) if ingredients.length == 0 else (
                                             <div>
-                                                {[
-                                                    <IngredientItem
-                                                        key={ing.name}
-                                                        ingredient={ing}
-                                                    /> for ing in ingredients
-                                                ]}
+                                                {ingredients.map(
+                                                    lambda ing: any, idx: any -> any {
+                                                        return <IngredientItem
+                                                            key={ing.name}
+                                                            ingredient={ing}
+                                                            excluded={excludedIngredients.includes(idx)}
+                                                            onExclude={lambda -> None { toggleIngredientExclude(idx); }}
+                                                        />;
+                                                    }
+                                                )}
                                                 <div className="ingredients-footer">
                                                     <div className="ingredients-total">
                                                         Total: ${totalCost.toFixed(2)}
                                                     </div>
-                                                    <button
-                                                        onClick={lambda -> None { clearIngredients(); }}
-                                                        className="btn-clear"
-                                                    >
-                                                        Clear
-                                                    </button>
+                                                    <div className="ingredients-actions">
+                                                        <button
+                                                            onClick={lambda -> None { clearIngredients(); }}
+                                                            className="btn-clear"
+                                                        >
+                                                            Clear
+                                                        </button>
+                                                        <select
+                                                            value={ingredientsPriority}
+                                                            onChange={lambda e: any -> None { ingredientsPriority = e.target.value; }}
+                                                            className="priority-select priority-select-small"
+                                                        >
+                                                            <option value="high">High</option>
+                                                            <option value="medium">Medium</option>
+                                                            <option value="low">Low</option>
+                                                        </select>
+                                                        <button
+                                                            onClick={lambda -> None { addIngredientsAsTodos(); }}
+                                                            className="btn-add-as-todos"
+                                                        >
+                                                            Add as Todos
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
